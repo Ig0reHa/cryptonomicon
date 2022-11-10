@@ -85,10 +85,27 @@
       </section>
 
       <template v-if="tickers.length">
+        <p>
+          <div>Фильтр: <input v-model="filter" /></div>
+          <button
+						@click="page -= 1"
+            class="my-4 disabled:bg-gray-300 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+						:disabled="!(page > 1)"
+          >
+            Назад
+          </button>
+          <button
+						@click="page += 1"
+            class="my-4 disabled:bg-gray-300 ml-3 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+					  :disabled="!hasNextPage"
+          >
+            Вперёд
+          </button>
+        </p>
         <hr class="w-full border-t border-gray-600 my-4" />
         <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
           <div
-            v-for="t in tickers"
+            v-for="t in filteredTickers()"
             :key="t.name"
             @click="select(t)"
             :class="{ 'border-4': sel === t }"
@@ -172,7 +189,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import type { Ticker } from '@/types/ticker';
 
 const AppIsReady = ref(false);
@@ -184,6 +201,20 @@ const graph = ref<number[]>([]);
 const allTickers = ref<{}>({});
 const foundTickers = ref<string[]>([]);
 const tickerAlreadyAdded = ref<boolean>(false);
+const page = ref<number>(1);
+const filter = ref<string>('');
+const hasNextPage = ref<boolean>(true);
+
+const filteredTickers = () => {
+	const start = (page.value - 1) * 6;
+	const end = page.value * 6;
+
+	const filteredTickers = tickers.value.filter((t) => t.name.toLowerCase().includes(filter.value.toLowerCase()));
+
+	hasNextPage.value = filteredTickers.length > end;
+
+	return filteredTickers.slice(start, end);
+};
 
 const subscribeToUpdates = (tickerName: string) => {
   const updatePrice = async () => {
@@ -234,6 +265,7 @@ const add = (inputTicker: string) => {
 
   const currentTicker = { name: inputTicker, price: '-' };
   tickers.value.push(currentTicker);
+	filter.value = '';
 
   localStorage.setItem('cryptonomicon-list', JSON.stringify(tickers.value));
 
@@ -250,6 +282,8 @@ const select = (t: Ticker) => {
 const handleDelete = (tickerToRemove: { name: string; price: string }) => {
   tickers.value = tickers.value.filter((t) => t.name !== tickerToRemove.name);
   sel.value = null;
+
+	localStorage.setItem('cryptonomicon-list', JSON.stringify(tickers.value));
 };
 
 const normalizeGraph = () => {
@@ -304,4 +338,23 @@ if (tickersData) {
     subscribeToUpdates(t.name);
   });
 }
+
+const windowData = Object.fromEntries(new URL(window.location.href).searchParams.entries());
+
+if (windowData.filter) {
+	filter.value = windowData.filter;
+}
+
+if (windowData.page) {
+	page.value = parseInt(windowData.page);
+}
+
+watch(filter, () => {
+	page.value = 1;
+	window.history.pushState(null, document.title, `${window.location.pathname}?filter=${filter.value}&page=${page.value}`);
+});
+
+watch(page, () => {
+	window.history.pushState(null, document.title, `${window.location.pathname}?filter=${filter.value}&page=${page.value}`);
+});
 </script>
