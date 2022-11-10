@@ -1,7 +1,7 @@
 <template>
   <div class="container mx-auto flex flex-col items-center bg-gray-100 p-4">
     <div
-      v-if="false"
+      v-if="!AppIsReady"
       class="fixed w-100 h-100 opacity-80 bg-purple-800 inset-0 z-50 flex items-center justify-center"
     >
       <svg
@@ -35,7 +35,8 @@
             <div class="mt-1 relative rounded-md shadow-md">
               <input
                 v-model="ticker"
-                @keydown.enter="add"
+                @keydown.enter="add(ticker)"
+                @input="searchTicker($event.target.value)"
                 type="text"
                 name="wallet"
                 id="wallet"
@@ -44,34 +45,25 @@
               />
             </div>
             <div
+              v-if="foundTickers.length"
               class="flex bg-white shadow-md p-1 rounded-md shadow-md flex-wrap"
             >
               <span
+                v-for="foundTicker in foundTickers"
+                :key="foundTicker"
+                @click="add(foundTicker)"
                 class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
               >
-                BTC
-              </span>
-              <span
-                class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-              >
-                DOGE
-              </span>
-              <span
-                class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-              >
-                BCH
-              </span>
-              <span
-                class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-              >
-                CHD
+                {{ foundTicker }}
               </span>
             </div>
-            <div class="text-sm text-red-600">Такой тикер уже добавлен</div>
+            <div v-if="tickerAlreadyAdded" class="text-sm text-red-600">
+              Такой тикер уже добавлен
+            </div>
           </div>
         </div>
         <button
-          @click="add"
+          @click="add(ticker)"
           type="button"
           class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
         >
@@ -103,7 +95,7 @@
             class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
           >
             <div class="px-4 py-5 sm:p-6 text-center">
-              <dt class="text-sm font-medium text-gray-500 truncate">
+              <dt class="text-sm uppercase font-medium text-gray-500 truncate">
                 {{ t.name }} - USD
               </dt>
               <dd class="mt-1 text-3xl font-semibold text-gray-900">
@@ -135,7 +127,9 @@
         <hr class="w-full border-t border-gray-600 my-4" />
 
         <section v-if="sel" class="relative">
-          <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
+          <h3
+            class="text-lg uppercase leading-6 font-medium text-gray-900 my-8"
+          >
             {{ sel.name }} - USD
           </h3>
           <div class="flex items-end border-gray-600 border-b border-l h-64">
@@ -181,40 +175,69 @@
 import { ref } from 'vue';
 import type { Ticker } from '@/types/ticker';
 
+const AppIsReady = ref(false);
+
 const ticker = ref<null | string>(null);
 const sel = ref<null | Ticker>(null);
 const tickers = ref<Ticker[]>([]);
 const graph = ref<number[]>([]);
+const allTickers = ref<{}>({});
+const foundTickers = ref<string[]>([]);
+const tickerAlreadyAdded = ref<boolean>(false);
 
-const add = () => {
-  if (!ticker.value) return;
-  const currentTicker = { name: ticker.value, price: '-' };
-  tickers.value.push(currentTicker);
-
+const subscribeToUpdates = (tickerName: string) => {
   const updatePrice = async () => {
-    const newTicker = tickers.value.find((t) => t.name === currentTicker.name);
-    if (!newTicker) {
+    try {
+      const newTicker = tickers.value.find((t) => t.name === tickerName);
+      if (!newTicker) {
+        clearInterval(updatePriceInterval);
+        return;
+      }
+
+      const res = await fetch(
+        `https://min-api.cryptocompare.com/data/price?fsym=${tickerName}&tsyms=USD&api_key=71878fbee77079c881b3c851ee1ab56f1b43ecddd0e4ce38d365aeeb9d94967d`
+      );
+      const data = await res.json();
+
+      newTicker.price =
+        data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
+
+      if (sel.value?.name === tickerName) {
+        graph.value?.push(data.USD);
+        if (graph.value.length > 18) graph.value.shift();
+      }
+    } catch (e) {
       clearInterval(updatePriceInterval);
-      return;
-    }
-
-    const res = await fetch(
-      `https://min-api.cryptocompare.com/data/price?fsym=${currentTicker.name}&tsyms=USD&api_key=71878fbee77079c881b3c851ee1ab56f1b43ecddd0e4ce38d365aeeb9d94967d`
-    );
-    const data = await res.json();
-
-    newTicker.price =
-      data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
-
-    if (sel.value?.name === currentTicker.name) {
-      graph.value?.push(data.USD);
-      if (graph.value.length > 18) graph.value.shift();
+      console.warn(e);
     }
   };
 
   updatePrice();
 
   const updatePriceInterval = setInterval(updatePrice, 3000);
+};
+
+const add = (inputTicker: string) => {
+  if (!inputTicker) return;
+  ticker.value = inputTicker;
+
+  if (
+    tickers.value.find(
+      (t) => t.name.toLowerCase() === inputTicker.toLowerCase()
+    )
+  ) {
+    tickerAlreadyAdded.value = true;
+    return;
+  }
+
+  tickerAlreadyAdded.value = false;
+
+  const currentTicker = { name: inputTicker, price: '-' };
+  tickers.value.push(currentTicker);
+
+  localStorage.setItem('cryptonomicon-list', JSON.stringify(tickers.value));
+
+  subscribeToUpdates(currentTicker.name);
 
   ticker.value = '';
 };
@@ -236,7 +259,49 @@ const normalizeGraph = () => {
   if (maxValue === minValue) return graph.value.map(() => 50);
 
   return graph.value.map(
-    (price) => 5 + ((price - minValue) * 100) / (maxValue - minValue)
+    (price) => 5 + ((price - minValue) * 95) / (maxValue - minValue)
   );
 };
+
+const searchTicker = (val: string) => {
+  if (!val) return [];
+  tickerAlreadyAdded.value = false;
+
+  foundTickers.value = [];
+
+  const MAX_RESULTS = 4;
+  let foundResults = 0;
+
+  for (const key of Object.keys(allTickers.value)) {
+    if (foundResults >= MAX_RESULTS) break;
+    if (key.toLowerCase().includes(val.toLowerCase())) {
+      foundResults++;
+      foundTickers.value.push(key);
+    }
+  }
+};
+
+const getAllCoinsList = async () => {
+  try {
+    const res = await fetch(
+      'https://min-api.cryptocompare.com/data/all/coinlist?summary=true'
+    );
+    const data = await res.json();
+    allTickers.value = data.Data;
+
+    AppIsReady.value = true;
+  } catch (e) {
+    console.warn(e);
+  }
+};
+
+getAllCoinsList();
+
+const tickersData = localStorage.getItem('cryptonomicon-list');
+if (tickersData) {
+  tickers.value = JSON.parse(tickersData);
+  tickers.value.forEach((t) => {
+    subscribeToUpdates(t.name);
+  });
+}
 </script>
